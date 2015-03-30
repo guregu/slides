@@ -1,0 +1,186 @@
+Immutable.js and Kizuna.js
+The Simplest React Data Flow? (Gunosy React Meetup #1)
+30 Mar 2015
+
+Gregory Roseberry
+Gunosy
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* Part #1: Purity
+
+* Purity
+
+What is purity?
+
+- A pure function is a function that always returns the same value given the same arguments. If f(1) = 3, then f(1) will always be 3 if f is a pure function. 
+
+- Also, evaluation of a pure function does not cause any side effects. But this is not particularly relevant to our talk.
+
+* Purity and React
+
+- If your component's render() only depends on its props and state, then it is pure.
+
+- Mixin PureRenderMixin to optimize pure components. They will only be re-rendered upon state and props changes.
+
+.code pure.js /^var Message/,/^}/ 
+
+* Cool, but what about this?
+
+	var messages = ["hello", "world"];
+	var newMessages = messages;
+	newMessages.push("🐱");
+	alert(messages === newMessages); // true!!
+
+Arrays and objects in JS are kind of like pointers. 
+
+You can't use shallow comparisons like == or === to check if they have changed.
+This means that PureRenderMixin won't work if your component uses arrays or objects.
+Of course, assigning it to a completely new array or object will trigger a change.
+
+* Immutable.js
+
+Introducing Immutable.js
+
+- Immutable data structures for JS
+- Made by Facebook 
+- http://facebook.github.io/immutable-js/
+- Uses some kind of magical data structure that is fast and stuff.
+
+	var messages = Immutable.List.of("hello", "world");
+	var newMessages = messages.push("🐱"); // returns a new List
+	alert(messages === newMessages); // false
+
+Aww yeah.
+
+* Using Immutable.js
+
+.code pure.js /^var MessageList/,/^}/ 
+
+* With Immutable.js, you can use PureRenderMixin everywhere!
+
+* Part 2: Data Flow
+
+* Data Flow
+
+How do I communicate between parent and child components?
+
+- Pass callbacks
+
+	<ChildComponent onSomething={this.doSomething} />
+
+- Flux
+
+	[insert Java code here]
+
+- Something else...?!
+
+* I want to handle data as simple as possible...!
+
+* Introducing: Kizuna
+
+Kizuna: a crazy global two-way binding thing.
+
+- Written by me.
+- In like three hours.
+- Not tested.
+- Don't use it (if you're scared). 
+
+.link https://github.com/guregu/kizuna.js
+
+npm: guregu/kizuna (probably)
+
+* What is Kizuna?
+
+Kind of like Angular.js ().
+
+Let's you bind a local state variable with a global store.
+
+Every time you call setState(), Kizuna will check if the value has changed.
+If it has, it will notify other components bound to the same store.
+
+* Kizuna: parent
+
+	var React = require("react");
+	var 絆    = require("kizuna");
+
+	var ParentThing = React.createClass({
+	  mixins: [絆.Mixin],
+	  getInitialState: function() {
+	    // here we initialize clickCounter
+	    // see: the React.render call at the bottom
+	    return {
+	      clicks: 0
+	    };
+	  },
+	  render: function() {
+	    // we bind the children state.clicks to the global "clickCounter" store
+	    return (
+	      <div>
+	        <ChildThing binding={{clicks: "clickCounter"}} />
+	        <SomeOtherThing binding={{clicks: "clickCounter"}} />
+	      </div>
+	    );
+	  }
+	})
+	// we bind clicks in our root component to "clickCounter"
+	React.render(<ParentThing binding={{clicks: "clickCounter"}} />, document.getElementById('content'));
+
+* Kizuna: child
+
+	var ChildThing = React.createClass({
+	  mixins: [絆.Mixin],
+	  handleClick: function() {
+	    // setting the state here will be reflected in the parent and elsewhere too
+	    this.setState({clicks: this.state.clicks + 1});
+	  },
+	  render: function() {
+	    return <button onClick={this.handleClick}>{this.state.clicks}</button>
+	  }
+	 }
+
+You can also get/set stuff manually.
+
+	絆.getStore("clickCounter").get();
+	絆.getStore("clickCounter").set(555);
+
+* Kizuna and Immutability
+
+Kizuna.js works the same way PureRenderMixin does. This means that to keep track of arrays, you have to use an immutable data structure. 
+
+Just use Immutable.js.
+
+* 
+
+	{name: "Greg #2", email: "greg@toki.waseda.jp"}
+
+.image chat.png
+
+* 
+
+- Yellow: entire app, contains list pane (left, orange) and detail pane (right, green).
+- Orange: list pane. Contains user details (purple).
+- When we click a purple user button, we want to change the green detail pane to its data.
+
+	<App>
+	  <UserList>
+	    <UserListing user={{user: "Greg #2", ...}} />
+	    ...
+	  </UserList>
+	  <UserDetail binding={{user: "currentUser"}} />
+	</App>
+
+Handle global state like this?
+
+	// UserListing 
+		onClick: function() {
+			絆.getStore("currentUser").set(this.state.user);
+		}
+
+Check it out (if you want).
+
+* Links
+
+.link https://github.com/facebook/immutable-js
+
+.link https://github.com/guregu/kizuna.js
