@@ -1,0 +1,190 @@
+Making a Game in Go
+Gunosy.go #12
+30 Mar 2015
+
+Gregory Roseberry
+Gunosy
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* 
+
+日本語はこちら:
+
+.link http://qiita.com/guregu/items/10cb5a8b8ad5a377ec6b
+
+* Can you really make games in Go? (Q&A)
+
+* Graphical applications
+
+- Q: Lots of people use Go for writing servers, but I've never seen a graphical Go app. Is it possible?
+- A: Nearly anything is possible! You can call out OpenGL via cgo. 
+
+* Garbage collection
+
+- Q: Go is garbage collected. Stop-the-world garbage collected. Doesn't that suck for games?
+- A: It's fine. Be careful with your garbage. Plus Go 1.5 will introduce a fancier (concurrent) GC, designed to stop-the-world for a very short amount of time. Use object pools (sync.Pool) and stuff.
+
+Someone made a quadcopter powered by Go!
+
+.link http://www.godrone.io/
+
+*  Libraries
+
+- Q: OpenGL is hard. cgo is hard. Is there a simpler way?
+- A: Well... here are some options.
+
+GXUI: Experimental cross platform GUI library. Not suited for real time games, but for turn based games (like a card game) you could definitely use this. 
+
+.link https://github.com/google/gxui
+
+Ebiten: "A simple SNES-like 2D game library for Go". Handles 2D graphics and mouse/keyboard input. 日本製. 
+
+.link http://hajimehoshi.github.io/ebiten/
+
+engi:  Multi-platform 2D game library for Go. "SUPER ALPHA". 
+
+.link https://github.com/ajhager/engi
+
+I will focus on engi for this presentation, because I have some experience with it, but I think these are all viable options.
+
+* engi (0.6.0)
+
+* What is engi?
+
+engi is a 2D game library. engi handles drawing and loading images, as well as mouse and keyboard input. engi will do your game loop for you, just overload a few methods. 
+
+engi is under development and the APIs often break, the dev branch looks pretty scary right now.
+
+* Using engi
+
+You can define your game's behavior by embedding *engi.Game and overloading the relevant methods.
+
+Let's make a simple "game" where you can move a picture around the screen with the arrow keys.
+
+	type Game struct {
+		*engi.Game // embed this!
+
+		icon  engi.Drawable // references a texture or texture region
+		batch *engi.Batch   // batch for drawing sprites
+		font  *engi.Font    // sprite font
+
+		iconX, iconY float32            // we will manipulate this later
+		keyMap 	     map[engi.Key]bool  // to keep track of key presses
+	}
+
+* Preload
+
+The preload method is the first method called. Use this for loading your images and initializing your stuff that needs initializing. 
+
+	func (game *Game) Preload() {
+		engi.Files.Add("icon", "data/icon.png")
+		engi.Files.Add("font", "data/font.png")
+		game.batch = engi.NewBatch(engi.Width(), engi.Height())
+	}
+
+* Setup
+
+Setup is called after preload. You can use the setup phase to manipulate images and such that you loaded in the preload phase. 
+
+	func (game *Game) Setup() {
+		engi.SetBg(0x2d3739) // background color
+		game.icon = engi.Files.Image("icon") // set our icon graphic to the image we loaded 
+		game.font = engi.NewGridFont(engi.Files.Image("font"), 20, 20)
+	}
+
+* Render
+
+Render is called every time the screen is to be drawn.
+You use the batch we set up earlier to draw stuff on the screen.
+
+	func (game *Game) Render() {
+		game.batch.Begin()
+		game.font.Print(game.batch, "ENGI", 475, 200, 0xffffff)
+		game.batch.Draw(game.icon, game.iconX, game.iconY, 0.5, 0.5, 10, 10, 0, 0xffffff, 1)
+		game.batch.End()
+	}
+
+You'll see that we use game.iconX and game.iconY to determine the position of the icon.
+We also display the word "ENGI" using the built in sprite fonts.
+
+* Key
+
+Key is called every time a key is pressed or released. We can use this to keep track of which keys are currently being pressed.
+
+	func (game *Game) Key(key engi.Key, modifier engi.Modifier, action engi.Action) {
+		switch action {
+		case engi.PRESS:
+			game.keyMap[key] = true
+		case engi.RELEASE:
+			game.keyMap[key] = false
+		}
+	}
+
+* Update
+
+This is where the "meat" of your game is. For our demo game, we will move the icon based on key presses. 
+
+	func (game *Game) Update(dt float32) {
+		var dx, dy float32
+		if game.keyMap[engi.ArrowUp]    { dy = -500 }
+		if game.keyMap[engi.ArrowDown]  { dy = 500 }
+		if game.keyMap[engi.ArrowLeft]  { dx = -500 }
+		if game.keyMap[engi.ArrowRight] { dx = 500 }
+		dx, dy = dx*dt, dy*dt // 適当に時間差に応じて動かす
+		game.botX += dx
+		game.botY += dy
+	}
+
+dt is the difference in time between this update and the last update. By using dt in our gameplay calculations, we can ensure that users get the same gameplay experience regardless of frame rate.
+
+* Main
+
+Alright, now we need to tell engi to run our game.
+
+	func main() {
+		engi.Open("Hello", 1024, 640, false, &Game{})
+	}
+
+.image hello.png
+
+* That's it!
+
+That's all you need to know to make a simple 2D game.
+
+I plan on releasing a game at Summer Comiket (夏コミ)... if I get in.
+
+Circle name: Kawaii Solutions 
+
+.link http://kawaii.solutions
+
+* Bonus: Tiled
+
+Here's my code for reading a Tiled tileset.
+
+	func (ts Tileset) Tiles() map[int]*engi.Region {
+		tiles := make(map[int]*engi.Region)
+		gid := ts.FirstGID
+		tex := ts.Texture()
+		w := (ts.ImageWidth - ts.Margin) / (ts.TileWidth + ts.Spacing)
+		h := (ts.ImageHeight - ts.Margin) / (ts.TileHeight + ts.Spacing)
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				u := ts.Margin + (ts.TileWidth+ts.Spacing)*x
+				v := ts.Margin + (ts.TileHeight+ts.Spacing)*y
+				r := engi.NewRegion(tex, u, v, ts.TileWidth, ts.TileHeight)
+				tiles[gid] = r
+				fmt.Println(gid, u, v)
+				gid++
+			}
+		}
+		return tiles
+	}
+
+.link https://gist.github.com/guregu/48e6b50e70fad59049c0
+
+* Tiled result
+
+.image game.png
+
+* Have fun!
