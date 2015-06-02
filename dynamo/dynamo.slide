@@ -1,0 +1,237 @@
+DynamoDB and Go
+Gunosy.go #13
+2 Jun 2015
+
+Gregory Roseberry
+Gunosy
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* What is DynamoDB?
+
+- NoSQL database, (almost) no schema
+- AWS service
+- Scalable and predictable
+- Pay mostly based on capacity. How many max reads/writes per second do you want?
+
+* Primary key(s)
+
+Every table has a hash key, used for sharding. This is unique per item. 
+
+Unless you specify a range key too, which is a secondary key used for sorting and stuff.
+
+Example: Image hosting
+
+- Hash key: Image ID
+
+Example: Message board posts
+
+- Hash key: Thread ID
+- Range key: Date
+
+* Indexes
+
+- Local secondary index: same hash key, an extra range key. 
+
+Example: Message board, use Thread ID and UserID index to filter a thread by users.
+
+- Global secondary index: an extra hash key and optionally range key.
+
+Example: UserID to get all posts made by a certain user. 
+
+* Console
+
+Handy console for viewing/editing data and managing tables.
+
+.image images.png
+
+* Official library
+
+- github.com/awslabs/aws-sdk-go/service/dynamodb
+
+It kinda sucks. Everything is a goddamn pointer. Even the maps are pointers.
+Arrays are []*string. Required values are nullable. Help.
+
+	type PutItemInput struct {
+		ConditionExpression         *string                     `type:"string"`
+		ConditionalOperator         *string                     `type:"string"`
+		ExpressionAttributeValues   *map[string]*AttributeValue `type:"map"`
+		Item                        *map[string]*AttributeValue `type:"map" required:"true"`
+		ReturnConsumedCapacity      *string                     `type:"string"`
+		ReturnItemCollectionMetrics *string                     `type:"string"`
+		ReturnValues                *string                     `type:"string"`
+		TableName                   *string                     `type:"string" required:"true"`
+	}
+
+* 😱
+
+All your items are shoved into (of course, a pointer to) a struct like this
+
+	type AttributeValue struct {
+		// A Binary data type.
+		B []byte `type:"blob"`
+		// A Boolean data type.
+		BOOL *bool `type:"boolean"`
+		// A Binary Set data type.
+		BS [][]byte `type:"list"`
+		// A List of attribute values.
+		L []*AttributeValue `type:"list"`
+		// A Map of attribute values.
+		M *map[string]*AttributeValue `type:"map"`
+		// A Number data type.
+		N *string `type:"string"`
+		// A Number Set data type.
+		NS []*string `type:"list"`
+		// A Null data type.
+		NULL *bool `type:"boolean"`
+		// A String data type.
+		S *string `type:"string"`
+		// A String Set data type.
+		SS []*string `type:"list"`
+	}
+
+* 😱😱
+
+Which one is my value in??
+
+Who knows.
+
+* We need... another library!
+
+* guregu/dynamo
+
+Expiermental library by me, inspired by mgo.
+
+- No docs.
+- API changes a lot.
+
+Pass dynamo your AWS creds.
+
+	import (
+		"github.com/awslabs/aws-sdk-go/aws"
+		"github.com/guregu/dynamo"
+	)
+
+	var dynamoDB = newDynamo()
+
+	func newDynamo() *dynamo.DB {
+		creds := aws.DefaultChainCredentials
+		return dynamo.New(&aws.Config{
+			Credentials: creds,
+			Region:      "us-west-2",
+		})
+	}
+
+* Putting an item
+
+	type Post struct {
+		ThreadID int
+		Date 	unixTime 
+		UserID   int
+		Text     string
+	}
+
+	func savePost(...) error {
+		p := Post{...}
+		posts := dynamoDB.Table("Posts")
+		return posts.Put(p) // たぶん posts.Put(p).Run()になる（ごめん）
+	}
+
+guregu/dynamo uses reflection to take care of all that AttributeValue crap for you.
+
+* Getting an item
+
+	func getPosts(threadID int) ([]Post, error) {
+		var results []Post
+		posts := dynamoDB.Table("Posts")
+		err := posts.Get("ThreadID", threadID).All(&results)
+		return results, err
+	}
+
+You can use range keys to filter stuff.
+	
+	var results []Post
+	posts := dynamoDB.Table("Posts")
+	err := posts.Get("UserID", 613).
+		Range("Date", dynamo.Between, 1425279050, 1425279200).
+		Limit(10).
+		Consistent(true).
+		All(&results)
+
+There are lots more options, and even more coming soon™. 
+
+* Update an item: atomic counter
+
+	package main
+
+	import (
+		"github.com/guregu/dynamo"
+	)
+
+	type Counter struct {
+		Table dynamo.Table
+		Name  string
+	}
+
+	func (c Counter) Next() (int64, error) {
+		var result count
+		err := c.Table.Update("Name", c.Name).Add("Count", 1).Value(&result)
+		return result.Count, err
+	}
+
+	type count struct {
+		Name  string
+		Count int64
+	}
+
+
+* Custom types
+
+Dynamo will try its best with reflection to get the right type, but you can write your own serialization/deserialzation methods as well. (PS: Don't use this)
+
+	type unixTime struct {
+	    time.Time
+	}
+
+	func (ut unixTime) MarshalDynamo() (dynamodb.AttributeValue, error) {
+	    num := strconv.FormatInt(ut.Unix(), 10)
+	    av := dynamodb.AttributeValue{
+	        N: aws.String(num),
+	    }
+	    return av, nil
+	}
+
+	func (ut *unixTime) UnmarshalDynamo(av dynamodb.AttributeValue) error {
+	    sec, err := strconv.ParseInt(*av.N, 10, 64)
+	    if err != nil {
+	        return err
+	    }
+	    *ut = unixTime{time.Unix(sec, 0)}
+	    return nil
+	}
+
+* But wait, there's more!
+
+Scan (get ALL the items in a table)
+
+	var users []User
+	err := dynamoDB.Table("Users").Scan().All(&users)
+
+Delete (deletes an item)
+
+	err := dynamoDB.Table("Users").Delete("ID", 613).Run()
+
+* Unimplemented things
+
+- Lists (sets are in)
+- Maps
+- Arbitrary structs inside of structs
+- Filtering
+- Lots more
+
+The encode/decode code is really bad. Needs a rewrite. 
+But it works! Currently powering kofoto.co
+
+Check it out, send me lots of pull requests.
+
+.link https://github.com/guregu/dynamo
