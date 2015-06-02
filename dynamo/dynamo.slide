@@ -63,7 +63,7 @@ Arrays are []*string. Required values are nullable. Help.
 		TableName                   *string                     `type:"string" required:"true"`
 	}
 
-* 😱
+* (´･_･`)
 
 All your items are shoved into (of course, a pointer to) a struct like this
 
@@ -90,7 +90,7 @@ All your items are shoved into (of course, a pointer to) a struct like this
 		SS []*string `type:"list"`
 	}
 
-* 😱😱
+* ヽ(｀Д´#)ﾉ
 
 Which one is my value in??
 
