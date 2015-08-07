@@ -411,9 +411,8 @@ Thank you, Goji.
 kami isn't perfect. It is rather inflexible and may not fit your needs.
 
 - You can't define separate groups of middleware, or separate groups of handlers, everything is global. You could mount kami.Handler() outside of "/" and use another router... 
-- You can't register middleware under wildcard paths: kami.Use("/user/:id/profile", middleware) won't work. Register it under /user/ and do your best. 
 
-I will probably fix these issues eventually. Might have to fork HttpRouter...
+Still considering whether multiple muxes fit kami's philosophy. 
 
 Pull requests are always welcome. 
 
