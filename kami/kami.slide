@@ -408,11 +408,7 @@ Thank you, Goji.
 
 * Downsides
 
-kami isn't perfect. It is rather inflexible and may not fit your needs.
-
-- You can't define separate groups of middleware, or separate groups of handlers, everything is global. You could mount kami.Handler() outside of "/" and use another router... 
-
-Still considering whether multiple muxes fit kami's philosophy. 
+kami isn't perfect. But everything was was on this slide is now taken care of!
 
 Pull requests are always welcome. 
 
