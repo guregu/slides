@@ -1,0 +1,524 @@
+Selling a Go Game at Comiket
+Go オールスターズ  
+11 Oct 2015
+
+Gregory Roseberry
+Kawaii Solutions
+greg@toki.waseda.jp
+http://kawaii.solutions
+@kawaiisolutions
+
+* Who am I?
+
+- Went to college in Japan
+- First fulltime Gopher at Gunosy
+- Currently work at Locari (Wondershake)
+
+Open source:
+
+- github.com/guregu/kami: web "framework" using x/net/context
+- github.com/guregu/mogi: SQL mocking/stubbing library
+- github.com/guregu/null: better version of sql.Null{Int64,Bool,String...}
+- and more!
+
+* What is Comiket?
+
+- Properly known as Comic Market
+- A huge fair where people sell doujinshi (self-published works)
+- Mostly comics, but also music and games.
+- Lots of derivative works (二次創作物), but original stuff is OK too  
+
+.image comiket-inside2.jpg
+.caption Picture by: コミックマーケット準備会 (@comiketofficial)
+
+* Why Comiket?
+
+Some of my favorite games (like Umineko no Naku Koro ni) were originally published at Comiket. Some doujin games go on to become cultural fixtures (see Touhou). 
+
+Selling a game at Comiket is featured in a few anime, like:
+
+- Welcome to the N.H.K.　(NHKにようこそ)
+- Genshiken 
+
+Always wanted to try skipping the huge line in the morning.
+
+* Why Go?
+
+- Why not?
+
+(Gopher picture, thanks Renee French)
+
+* Final product
+
+HOT PLUG: 2D action game, built in spare time over 6 months. For PC/Mac.
+
+.image hotplug2.png
+
+* Results
+
+Go-ish things:
+
+- "Entity component system" using interfaces and struct composition 
+- Easy builds, just "go get"
+
+Un-Go things:
+
+- Mostly single-threaded (except Audio)
+
+* Comiket tips
+
+- Apply online, not by mail. It's a lot easier to fill out the online form!
+- Triple check EVERYTHING! Google anything that you don't understand, or ask 2ch.
+- Clearly state the title and genre of your game when you apply, apparently this is the most important part of the application for doujin games. 
+- Don't throw anything away. Your application set from the very beginning includes 見本誌票 that you need at the very end!
+
+.image cut.png
+
+* Libraries used:
+
+- ajhager/engi: 2D game engine
+- guregu/eng: my fork with sound support
+- azul3d.org/native/al.v1: playing sounds
+- azul3d.org/audio.v1: reading audio files
+- azul3d.org/audio/flac.dev
+- azul3d.org/audio/wav.v1
+- github.com/beefsack/go-astar: pathfinding
+
+* Game engine
+
+* ajhager/engi
+
+Simple 2D game engine. Includes game loop, loading and drawing images. 
+
+By implementing this interface (or embedding the engi.Game struct), 
+you can respond to various events in the game loop.
+
+    type Responder interface {
+        Preload() 
+        Setup()
+        Resize(width, height int)
+        Close()
+
+        Update(dt float32)
+        Render()
+
+        Mouse(x, y float32, action Action)
+        Scroll(amount float32)
+
+        Key(key Key, modifier Modifier, action Action)
+        Type(char rune)
+    }
+
+* engi impressions
+
+Good:
+
+- Super simple, easy to use (reminds me of XNA)
+- Good performance
+- Install everything with "go get", even C deps!
+- Supports browsers? (GopherJS)
+- Works on OS X, Windows, Linux
+
+Bad:
+
+- No documents
+- Unstable API 
+- Development not really active
+- No audio support
+- Missing functionality (like render to texture)
+
+* engi fork
+
+My fork at guregu/eng. I would like to merge this with engi eventually, if possible.
+
+Includes audio support, Sound for SFX and Stream for playing music. 
+
+    engi.Files.Sound("sfx/hit").Play()
+
+Right before Comiket, commits were frantic: 
+
+- "too busy for commit msgs atm"
+
+Needs more work! Adding audio broke web support.
+
+* Audio libraries
+
+- azul3d.org/audio.v1
+
+Sort of like the "image" package in the standard library, but for audio. Native Go.
+
+Just like the image package, you add support for formats by importing them.
+
+    import _ azul3d.org/audio/flac.dev
+    import _ azul3d.org/audio/wav.v1
+
+- azul3d.org/native/al.v1
+
+This is a Go wrapper for the C OpenAL library. It's... really hard to use. Error handling happens in a separate thread, so it's difficult to figure out which of your calls are failing. Since it's just a C wrapper, if you're familiar with OpenAL you should have no issues.
+
+I had help from my former coworker Kurokawa-san, and lots of example code in C and Java. There are basically no usage examples for Go.
+
+* Assets
+
+* Map editor
+
+Tiled is an open source tile-based map editor. It can export maps in a convenient JSON format. I used Tiled objects to place the player spawn, enemies, exit, etc.
+
+.link http://www.mapeditor.org
+.image tiled.png
+
+* Audio
+
+I couldn't find any way to play MP3 files, so I used WAV and FLAC. Sound effects are mostly WAV, and the background music is FLAC. 
+
+StewRat, an artist and internet buddy of mine made the background music.
+
+Free SFX were used. 
+
+* Graphics
+
+By meepches, another internet friend. Sprites are represented by a simple sprite map.
+
+.image sprite.png
+
+Animations are defined... in code. JSON would probably be better.
+
+    sprite: &animated{
+        color:   0xffffff,
+        sheet:   engi.Files.Image("sprite/mc"),
+        spritew: 50,
+        spriteh: 80,
+        animations: map[string]*animation{
+            "walk_right": &animation{
+                tiles:  []int{8, 9, 10, 11, 12, 13, 14, 15},
+                delays: []float32{0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07},
+                repeat: true,
+            },
+
+* Go tricks for game dev
+
+* Interfaces
+
+Game objects implement at the very least Object.
+
+    type ID int64
+
+    type Object interface {
+        ID() ID
+    }
+    type Physical interface {
+        Object
+        Bounds() (x, y, width, height int)
+    }
+    type Mob interface {
+        Physical
+        Move(x, y int)  // sets this mob's position to x, y
+        Velocity() (x, y int)
+    }
+    type Updater interface {
+        Object
+        Update(t Tick, dt float32)
+    }
+    type Collider interface {
+        Physical
+        Collide(m Mob, x, y int) bool
+    }
+
+* Interface upgrades
+
+By abusing type assertions, we can use Go interfaces as something similar to Entity Component Systems. For example, let's say we want the player to be immune to their own attacks. First let's define an alignment system.
+
+    type Alignment int // 属性
+
+    const (
+        Neutral Alignment = iota // 壁など
+        Good                     // プレイヤー
+        Evil                     // モンスター
+    )
+
+    type Aligned interface {
+        Alignment() Alignment
+    }
+
+    func AlignmentOf(o Object) Alignment {
+        if a, ok := o.(Aligned); ok {
+            return a.Alignment()
+        }
+        return Neutral
+    }
+
+* Interface upgrades (2)
+
+We give attacks (Bullets) the alignment of their shooter. When a bullet collides with something, we ignore the collision if the alignments match.
+
+    func (b *Bullet) Collide(m Mob, toX, toY int) bool {
+        if b.alignment == AlignmentOf(m) {
+            return false
+        }
+
+        b.hit(m)
+        return false
+    }
+
+Similarly, we move our mobs each frame like so:
+
+    func (w *World) moveMobs() {
+        for _, obj := range w.Objects {
+            if mob, ok := obj.(Mob); ok {
+                vx, vy := mob.Velocity()
+                // do collision detection, etc...
+            }
+        }
+    }
+
+* Interface upgrades (3)
+
+Our main game loop is just a bunch of interface upgrades.
+
+    type World struct {
+        Objects map[ID]Object
+        // ...
+    }
+
+    func (w *World) Update(dt float32) {
+        // ...
+
+        w.moveMobs()
+
+        for _, obj := range w.Objects {
+            if updater, ok := obj.(Updater); ok {
+                updater.Update(w.Now, dt)
+            }
+        }
+
+        for _, obj := range w.Visible {
+            if anim, ok := obj.(Animated); ok {
+                anim.Animate(dt)
+            }
+        }
+    }
+
+I thought this might be too slow, but the runtime calls make the game less than 1% slower. It's worth it, IMO.
+
+* Type assertion
+
+It's easy to limit certain interactions to players, just use a type assertion.
+
+    func (warp *Warp) Collide(m Mob, toX, toY int) bool {
+        p, isPlayer := m.(*Player)
+        if !isPlayer {
+            return false
+        }
+
+        // warp to next level...
+    }
+
+This way, you won't win when enemies walk into the exit. 
+
+* Struct composition
+
+It's easy to reuse code, just embed the common functionality.
+
+    type char struct {
+        id   ID
+        x, y int
+        w, h int
+
+        *animated
+        ...
+    }
+
+    type Player struct {
+        *char
+        Powerups []Powerup
+    }
+
+    type Enemy struct {
+        *char
+        idleAI  *brain
+        chaseAI *brain
+        aura    *Aura
+        ...
+    }
+
+* Functional programming
+
+Sometimes it's convenient to define game behavior in a functional manner.
+
+    type Powerup struct {
+        Text   string
+        Effect func(*Player)
+    }
+
+    var Powerups = []Powerup{
+        {
+            Text: "TURBO BUTTON",
+            Effect: func(p *Player) {
+                p.gun.delay -= 0.1 
+            },
+        },
+        {
+            Text: "OVERCLOCK",
+            Effect: func(p *Player) {
+                p.speed += 2
+                p.animated.rate = 1.5
+            },
+        },
+        ...
+    }
+
+* Functional programming (2)
+
+We can also use closures to schedule a chunk of code to be executed on the next frame.
+
+Here we need to wait until the next frame to move the player to the next level's spawn point. 
+
+    func (warp *Warp) Collide(m Mob, toX, toY int) bool {
+        // ...
+
+        // go to next level
+        if warp.world.NextLevel() {   // set next level flag
+            warp.world.Defer(func() {   // run on next frame...
+                // we have gone to the next level, so move 
+                // the player to the spawn point
+                warp.world.Add(m)
+                m.Move(warp.world.Floor.SpawnX, warp.world.Floor.SpawnY)
+            })
+        }
+    }
+
+* Fast builds
+
+Building with cgo is really slow! Sometimes I would be plagued with builds that took much longer than normal. Turns out, unless you run "go install" on your cgo-using package, it will be rebuilt every time!
+
+    $ time go build
+    real    0m37.292s
+    user    0m52.941s
+    sys     0m4.705s
+
+    $ go install github.com/guregu/eng
+
+    $ time go build
+    real    0m3.226s
+    user    0m4.352s
+    sys     0m0.677s
+
+10x faster builds!
+
+* Profiling
+
+Use the built-in pprof tool. It's awesome. OS X users: you might need to use rsc's kernel patch.
+
+.link http://rsc.io/pprof_mac_fix
+
+At one point, calls to fmt.Println were slowing down the game by 30%! Be careful with your logging.
+
+* Regrets
+
+* Not using float32 for everything
+
+engi uses float32 for mostly everything, but my game uses a lot of ints. This means I have to do a lot of type casting, which is slow and ugly.
+
+Go's standard math package only supports float64, but there are 3rd party float32 math packages. 
+
+I have to copy/paste these every time I need them in a separate package:
+
+    func maxi(a, b int) int {
+        if a > b {
+            return a
+        }
+        return b
+    }
+
+    func mini(a, b int) int {
+        if a < b {
+            return a
+        }
+        return b
+    }
+    // ...
+
+* Not paying attention in school
+
+I wish I could remember anything I learned from Geometry in high school. They should have told me all that stuff is for making games!
+
+.image collision.png
+.caption Collision detection took me way longer than it should have.
+
+* Putting origins in the top left, not the center.
+
+In HOT PLUG's coordinate system, an object at (10, 10) means that the object's top-left is located at (10, 10). It would be a lot easier to have objects' origins be in the center and store the extents instead of width/height. 
+
+I could have avoided a lot of code like:
+
+   func (c *chest) SpriteBounds() (x, y, w, h int) {
+    return c.x - (c.spritew - c.w/2), c.y - (c.spriteh - c.h/2), c.spritew, c.spriteh
+   }
+
+.image origin.png
+
+* Being lazy with the collision system
+
+I thought it would be easier to deal with everything as an AABB (axis aligned bound box, a rectangle without rotation). This works nicely for physics calculations, but it making maps is annoying. You have to draw individual rectangles for every possible collision. 
+
+.image tiled.png
+
+* Being lazy in general
+
+I regret not scheduling explicit times to work on the game. It's hard to keep your motivation when your game is barely a game, and you're not even sure whether you've gotten accepted yet.
+
+.image commits.png
+
+- March: "let's make a game"
+- April: applied
+- June: accepted
+
+* Not planning the non-game stuff better
+
+Making the game's website, preparing the CDs, filling out forms, preparing your circle space... I wish I had worked on this stuff earlier. It ate up a good chunk of time when I needed time the most. 
+
+.image booth.jpg
+.caption I didn't realize I used the same image in the cover, title screen, and circle name paper at the bottom until it was too late...
+
+* Not testing on various hardware.
+
+There's a terrible engi bug on Windows. 
+
+engi relies on V-Sync to prevent itself from running too fast. engi's underlying C library, GLFW, silently disabled V-Sync on certain configurations of Windows until recently. Updating GLFW solved the problem.
+
+I didn't know about this until the day after Comiket. Artist: "Did you even test this on Windows?" 
+
+I did... but only on my Windows machine.
+
+* Not having a gameplay video
+
+I had my laptop set up to let people play my game, but people are very shy! Oddly enough, I think videos are more effective than actually playing the game.
+
+* Wrapping up
+
+* Results
+
+- I made 15 CDs, burning them while cutting out the covers from paper I printed at Family Mart the night before Comiket.
+- Of those 15, I sold 12!
+- Total 赤字, but it was fun.
+
+* Go and Games
+
+You'll have to do a lot of things yourself. Animations, sound, collision... Go needs more game libraries! 
+
+But, Go is a totally viable language for game development.
+
+Your library could be the Go game library of the future.
+
+* Future
+
+I plan to continue developing HOT PLUG. What could the future hold?
+
+- Comiket 90+?
+- Steam Greenlight?
+- Kickstarter?
+- Open-sourcing?
+
+I believe there is a bright future for Go game development, especially with the recently added mobile support. HOT PLUG may have been the first Go game to ever be sold "commercially", but there is still so much more to do.
+
+Let's make games in Go!
