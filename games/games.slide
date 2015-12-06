@@ -1,0 +1,278 @@
+2D Games in Go
+GoCon   
+12 Dec 2015
+
+Gregory Roseberry
+Kawaii Solutions
+greg@toki.waseda.jp
+http://kawaii.solutions
+@kawaiisolutions
+
+* Who am I?
+
+- Went to college in Japan
+- First fulltime Gopher at Gunosy
+- Currently work at Locari (Wondershake)
+
+Open source:
+
+- github.com/guregu/kami: web "framework" using x/net/context
+- github.com/guregu/mogi: SQL mocking/stubbing library
+- github.com/guregu/null: better version of sql.Null{Int64,Bool,String...}
+- github.com/guregu/dynamo: fancy DynamoDB library
+- and more!
+
+* Let's make games in Go!
+
+* 2D Game Engines
+
+* ajhager/engi
+
+.link https://github.com/ajhager/engi
+
+One of the first 2D game engines for Go. Name probably comes from "engine". 
+
+- Desktop support using GLFW (Windows, Mac, Linux)
+- Web support using GopherJS and WebGL
+- Dev branch has some mobile support?
+- Abandoned? (´・ω・｀)
+
+Example code drawing to the screen:
+
+	func (game *Game) Render() {
+		game.batch.Begin()
+		game.batch.Draw(sprite, drawx, drawy, 0.0, 0.0, scalew, scaleh, 0, color, 1)
+		// draw more things...
+		game.batch.End()
+	}
+
+
+* guregu/engi
+
+.link https://github.com/ajhager/engi
+
+My fork of ajhager/engi. Let's call it 演技.
+
+- Newer GLFW: bug fixes (Windows VSync)
+- Audio support! (WAV and FLAC)
+- Broke web support 😞
+
+I've decided to take fork responsibility as of yesterday.
+Maybe add mobile support?
+
+(Somewhat) battle tested.
+
+* paked/engi
+
+.link https://github.com/paked/engi
+
+Another fork of engi.
+
+- Entity Component System
+- Under active development
+- More "batteries included" (Camera, Animations, Audio)
+- No web support
+
+	func (as *AudioSystem) New(*ecs.World) {
+		as.System = ecs.NewSystem()
+		if err := al.OpenDevice(); err != nil { ... }
+		Mailbox.Listen("CameraMessage", func(msg Message) {
+			_, ok := msg.(CameraMessage) // handle error...
+			al.SetListenerPosition(al.Vector{cam.X() / Width(), cam.Y() / Height(), cam.Z() * as.HeightModifier})
+		})
+	}
+
+* Ebiten
+
+.link http://hajimehoshi.github.io/ebiten/
+
+"SNES-like" game library. Also a GLFW wrapper. By @hajimehoshi. 
+
+- Web support
+- Experimental audio support
+- Richer image manipulation support (filters, etc)
+- Relatively active development
+
+* Almost standard library
+
+- golang/mobile 
+
+Has sprite packages. Mobile support (obviously). No web support. No Windows support (?). The future.
+
+- golang/exp/shiny
+
+Experimental UI library for Go mobile. Worth keeping an eye on!
+
+* Using engi
+
+* Using engi
+
+Implement this interface! 
+
+	type Responder interface {
+	    Render()
+	    Resize(width, height int)
+	    Preload()
+	    Setup()
+	    Close()
+	    Update(dt float32)
+	    Mouse(x, y float32, action Action)
+	    Scroll(amount float32)
+	    Key(key Key, modifier Modifier, action Action)
+	    Type(char rune)
+	}
+
+Run like so:
+	
+	func main() {
+		rand.Seed(time.Now().UnixNano()) // don't forget to seed your RNG!
+		engi.Open("Game Title", width, height, fullscreen, &Game{})
+	}
+
+* Using engi (2)
+
+You can embed *engi.Game inside your own struct, and override the methods you care about.
+
+	type Game struct {
+		*engi.Game
+		batch  *engi.Batch
+		player *Player
+		dot    engi.Drawable
+	}
+
+	func (game *Game) Preload() {
+		loadAssets()
+		game.batch = engi.NewBatch(engi.Width(), engi.Height())
+	}
+
+
+	func (game *Game) Setup() {
+		game.dot = engi.Files.Image("dot")
+		game.player = &Player{ /* ... */ }
+	}
+
+* My "game engine"
+
+* Game objects
+
+	type ID int64
+	type Object interface {
+		ID() ID
+	}
+	type Physical interface {
+		Object
+		Bounds() (x, y, width, height int)
+	}
+	type Mob interface {
+		Physical
+		// Move sets this mob's position to x, y
+		Move(x, y int)
+		Velocity() (x, y int)
+	}
+	type Updater interface {
+		Object
+		Update(dt float32)
+	}
+	type Collider interface {
+		Physical
+		Collide(m Mob, x, y int) bool
+	}
+
+Interfaces that game objects may or may not implement.
+
+* Game loop 
+
+	type World struct {
+		Objects  map[ID]Object
+		lastID   ID       // for assigning object IDs
+		Won      bool     // game over?
+		deferred []func() // funcs to call on the next frame
+	}
+
+	func (w *World) Update(dt float32) {
+		// 1. run all w.deferred funcs ...
+		for _, f := range w.deferred {
+			f()
+		}
+		w.deferred = nil
+		// 2. physics
+		w.moveMobs() 
+		// 3. update all objects
+		for _, obj := range w.Objects {
+			if updater, ok := obj.(Updater); ok {
+				updater.Update(dt)
+			}
+		}
+	}
+
+* Physics abusing interface upgrades
+
+	func (w *World) moveMobs() {
+		for _, obj := range w.Objects {
+			if mob, ok := obj.(Mob); ok {
+				vx, vy := mob.Velocity()
+				cx, cy, width, height := mob.Bounds()
+				x, y := cx+vx, cy+vy // dest x, y
+				// check map boundries
+				// ...
+				for _, obj := range w.Objects {
+					if mob == obj {
+						continue
+					}
+					if collider, ok := obj.(Collider); ok {
+						if hit, penX, penY := colliding(collider, x, y, width, height); hit {
+							if collider.Collide(mob, x, y) {
+								x += penX
+								y += penY
+							}
+						}
+					}
+				}
+				mob.Move(x, y)
+			}
+		}
+	}
+
+* Defer
+
+Use world.Defer to delete this object in the next frame.
+
+	func (e *Enemy) Update(dt float32) {
+		if e.Dead {
+			e.disappear -= dt
+			if e.disappear <= 0 {
+				e.World.Defer(func() {
+					e.World.Delete(e.ID())
+				})
+			}
+			return
+		}
+
+		// ...
+	}
+
+* And more...
+
+Check out my other presentation here:
+
+.link https://go-talks.appspot.com/github.com/guregu/slides/comiket/comiket.slide
+
+Google: comiket golang
+
+* Case study
+
+HOT PLUG: 2D action game, built in spare time over 6 months. For PC/Mac/Linux.
+
+.image hotplug2.png
+
+* Participated in Comiket 88
+
+.image booth.jpg
+.image cut.png
+
+* The future
+
+- Mobile support for engi?
+- Go games on Steam?
+
+Let's make games in Go!
