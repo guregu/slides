@@ -1,9 +1,9 @@
-DynamoDB and Go
-Gunosy.go #13
-2 Jun 2015
+DynamoDB and Go (v2)
+Wondershake社内LT会
+14 Sep 2017
 
 Gregory Roseberry
-Gunosy
+Wondershake
 greg@toki.waseda.jp
 https://github.com/guregu
 
@@ -49,23 +49,7 @@ Handy console for viewing/editing data and managing tables.
 
 - github.com/awslabs/aws-sdk-go/service/dynamodb
 
-It kinda sucks. Everything is a goddamn pointer. Even the maps are pointers.
-Arrays are []*string. Required values are nullable. Help.
-
-	type PutItemInput struct {
-		ConditionExpression         *string                     `type:"string"`
-		ConditionalOperator         *string                     `type:"string"`
-		ExpressionAttributeValues   *map[string]*AttributeValue `type:"map"`
-		Item                        *map[string]*AttributeValue `type:"map" required:"true"`
-		ReturnConsumedCapacity      *string                     `type:"string"`
-		ReturnItemCollectionMetrics *string                     `type:"string"`
-		ReturnValues                *string                     `type:"string"`
-		TableName                   *string                     `type:"string" required:"true"`
-	}
-
-* (´･_･`)
-
-All your items are shoved into (of course, a pointer to) a struct like this
+All your items are shoved into a struct like this
 
 	type AttributeValue struct {
 		// A Binary data type.
@@ -90,100 +74,81 @@ All your items are shoved into (of course, a pointer to) a struct like this
 		SS []*string `type:"list"`
 	}
 
-* ヽ(｀Д´#)ﾉ
-
-Which one is my value in??
-
-Who knows.
-
-* We need... another library!
-
 * guregu/dynamo
 
-Expiermental library by me, inspired by mgo.
+Library by me, inspired by mgo.
 
-- No docs.
-- API changes a lot.
+- Mostly stable
+- Focused on ease of use
 
 Pass dynamo your AWS creds.
 
 	import (
-		"github.com/awslabs/aws-sdk-go/aws"
+		"github.com/aws/aws-sdk-go/aws"
+		"github.com/aws/aws-sdk-go/aws/session"
 		"github.com/guregu/dynamo"
 	)
 
 	var dynamoDB = newDynamo()
 
 	func newDynamo() *dynamo.DB {
-		creds := aws.DefaultChainCredentials
-		return dynamo.New(&aws.Config{
-			Credentials: creds,
-			Region:      "us-west-2",
+		return dynamo.New(session.New(), &aws.Config{
+			Region: aws.String("us-west-2")
 		})
 	}
 
+* Creating a table
+
+	type AdStats struct {
+		ID		int `dynamo:",hash" // Primary key (hash key)
+		Imps  	int
+		Clicks	int
+
+		UpdatedAt time.Time `dynamo:",omitempty"`
+	}
+
+	err := dynamoDB.CreateTable("Locari-AdStats").Provision(1, 5).Run()
+
 * Putting an item
 
-	type Post struct {
-		ThreadID int
-		Date 	unixTime 
-		UserID   int
-		Text     string
+	func (a *AdStats) Save() error {
+		a.UpdatedAt = time.Now().UTC()
+		table := dynamoDB.Table("Locari-AdStats")
+		return table.Put(a).Run()
 	}
 
-	func savePost(...) error {
-		p := Post{...}
-		posts := dynamoDB.Table("Posts")
-		return posts.Put(p) // たぶん posts.Put(p).Run()になる（ごめん）
+guregu/dynamo uses reflection to create AttributeValues for you, much like encoding/json standard library.
+
+* Conditional puts
+
+You can specify conditions that a put must satisfy to succeed. 
+
+	func (a AdStats) Create() error {
+		table := dynamoDB.Table("Locari-AdStats")
+		return table.Put(a).If("attribute_not_exists(ID)").Run()
 	}
 
-guregu/dynamo uses reflection to take care of all that AttributeValue crap for you.
+If the item already exists, you get a ConditionalCheckFailedException from AWS.
 
 * Getting an item
 
-	func getPosts(threadID int) ([]Post, error) {
-		var results []Post
-		posts := dynamoDB.Table("Posts")
-		err := posts.Get("ThreadID", threadID).All(&results)
-		return results, err
+	func GetAdStats(id int) (AdStats, error) {
+		table := dynamoDB.Table("Locari-AdStats")
+		var a AdStats
+		err := table.Get("ID", id).One(&a)
+		return a, err
 	}
 
-You can use range keys to filter stuff.
+* Update an item: atomic increments 
 	
-	var results []Post
-	posts := dynamoDB.Table("Posts")
-	err := posts.Get("UserID", 613).
-		Range("Date", dynamo.Between, 1425279050, 1425279200).
-		Limit(10).
-		Consistent(true).
-		All(&results)
-
-There are lots more options, and even more coming soon™. 
-
-* Update an item: atomic counter
-
-	package main
-
-	import (
-		"github.com/guregu/dynamo"
-	)
-
-	type Counter struct {
-		Table dynamo.Table
-		Name  string
+	func (a *AdStats) Increment(imps, clicks int) error {
+		table := dynamoDB.Table("Locari-AdStats")
+		return table.Update("ID", a.ID).
+			Add("Imps", imps).
+			Add("Clicks", clicks).
+			Set("UpdatedAt", time.Now().UTC().Format(time.RFC3339)).
+			Value(a)
 	}
-
-	func (c Counter) Next() (int64, error) {
-		var result count
-		err := c.Table.Update("Name", c.Name).Add("Count", 1).Value(&result)
-		return result.Count, err
-	}
-
-	type count struct {
-		Name  string
-		Count int64
-	}
-
 
 * Custom types
 
@@ -193,7 +158,7 @@ Dynamo will try its best with reflection to get the right type, but you can writ
 	    time.Time
 	}
 
-	func (ut unixTime) MarshalDynamo() (dynamodb.AttributeValue, error) {
+	func (ut unixTime) MarshalDynamo() (*dynamodb.AttributeValue, error) {
 	    num := strconv.FormatInt(ut.Unix(), 10)
 	    av := dynamodb.AttributeValue{
 	        N: aws.String(num),
@@ -201,7 +166,7 @@ Dynamo will try its best with reflection to get the right type, but you can writ
 	    return av, nil
 	}
 
-	func (ut *unixTime) UnmarshalDynamo(av dynamodb.AttributeValue) error {
+	func (ut *unixTime) UnmarshalDynamo(av *dynamodb.AttributeValue) error {
 	    sec, err := strconv.ParseInt(*av.N, 10, 64)
 	    if err != nil {
 	        return err
@@ -210,28 +175,48 @@ Dynamo will try its best with reflection to get the right type, but you can writ
 	    return nil
 	}
 
-* But wait, there's more!
+* Scan
 
-Scan (get ALL the items in a table)
+Get all items in the table.
 
-	var users []User
-	err := dynamoDB.Table("Users").Scan().All(&users)
+	table := dynamoDB.Table("Locari-AdStats")
+	var stats []AdStats
+	err := table.Scan().All(&stats)
 
-Delete (deletes an item)
+Filter results and iterate one by one.
 
-	err := dynamoDB.Table("Users").Delete("ID", 613).Run()
+	func recrawl(cutoff time.Time) error {
+		itr := dynamoDB.Table(itemTableName).Scan().Filter("Crawled < ?", cutoff.UTC()).Iter()
+		var item Item
+		for itr.Next(&item) {
+			msg := &sqs.SendMessageInput{
+				QueueUrl:    queueURL,
+				MessageBody: &item.URL,
+			}
+			_, err := crawlQueue.SendMessage(msg)
+			if err != nil {
+				return err
+			}
+		}
+		return itr.Err()
+	}
 
-* Unimplemented things
 
-- Lists (sets are in)
-- Maps
-- Arbitrary structs inside of structs
-- Filtering
-- Lots more
+* Much more
 
-The encode/decode code is really bad. Needs a rewrite. 
-But it works! Currently powering kofoto.co
+- Sets ([]string or map[string]struct{})
+- Deleting items and tables
+- Modifying tables
+- Batch get/put/delete.
 
-Check it out, send me lots of pull requests.
+* Still under development
+
+But almost done?
+
+- Parallel scan
+- Better docs
+- Something else?
+
+Send me a PR!
 
 .link https://github.com/guregu/dynamo
