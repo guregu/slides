@@ -119,8 +119,8 @@ Interfaces: -er, Contracts: -able?
 Something that will be dangerously tempting to use is the ability to operate on structs generically.
 	
 	contract Physical(t T) {
-		t.X = 0
-		t.Y = 0
+		t.X = int(0)
+		t.Y = int(0)
 	}
 
 	type Player struct {
@@ -135,7 +135,7 @@ Something that will be dangerously tempting to use is the ability to operate on 
 You could then write a function like:
 
 	func Distance(type T Physical)(a, b T) int {
-		return Abs(a.X - b.X) + Abs(a.Y - b.Y)
+		return (int)(Abs(a.X - b.X) + Abs(a.Y - b.Y))
 	}
 
 * Laziness (cont'd)
