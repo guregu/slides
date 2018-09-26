@@ -1,0 +1,210 @@
+Thoughts on the Go 2.0 Generics Proposal
+27 Sep 2018
+
+Gregory Roseberry
+Wondershake
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* Intro
+
+GitHub: guregu
+Work at Wondershake (makers of LOCARI)
+Big fan of Go
+
+* Generics
+
+First thought: Yay! 🎉
+
+* Where to use?
+
+Here are some areas I've always wanted to use generics.
+
+- Eliminating duplicate code
+- Eliminating boilerplate
+- Eliminating run-time panics with reflection
+
+* Math stuff
+
+When making a game, you end up writing a lot of duplicate code.
+
+	func maxi(a, b int) int {
+		if a > b {
+			return a
+		}
+		return b
+	}
+
+	func maxf(a, b float64) float64 {
+		if a > b {
+			return a
+		}
+		return b
+	}
+
+	func maxf32(a, b float32) float32 {
+		if a > b {
+			return a
+		}
+		return b
+	}
+
+* Min/max
+
+Now, we only have to write one generic function.
+
+	contract Comparable(t T) {
+		t > t
+	}
+
+	func Min(type T Comparable)(a T, b T) T {
+		if a < b {
+			return a
+		}
+		return b
+	}
+
+	func Max(type T Comparable)(a T, b T) T {
+		if a > b {
+			return a
+		}
+		return b
+	}
+
+	func takeDamage(damage int) {
+		player.HP = Max(player.HP - damage, 0)
+	}
+
+* More math: absolute value, sign
+
+Here's another example:
+
+	contract Signed(t T) {
+		t = -t
+	}
+
+	func Abs(type T Signed)(n T) T {
+		if n < 0 {
+			return -n
+		}
+		return n
+	}
+
+	func Sign(type T Signed)(n T) T {
+		if n > 0 {
+			return (T)(1)
+		}
+		if n < 0 {
+			return (T)(-1)
+		}
+		return (T)(0)
+	}
+
+* Names are hard
+	
+There are only two hard things in Computer Science: cache invalidation and naming things.
+— Phil Karlton
+
+"Signed" isn't a very good name for the contract, because types without signs such as uint32 can still take the unary - operator. 
+But, the above functions should still work fine for unsigned types.
+Can you think of a better name?
+
+	sgn := Sign(uint(1337)) // returns 1
+
+From the proposal: Equal, not Equalable. Addable, not Add? 
+Interfaces: -er, Contracts: -able?
+
+* Laziness
+
+Something that will be dangerously tempting to use is the ability to operate on structs generically.
+	
+	contract Physical(t T) {
+		t.X = 0
+		t.Y = 0
+	}
+
+	type Player struct {
+		X, Y int
+		// ... other stuff
+	}
+
+	type Point struct {
+		X, Y int
+	}
+
+You could then write a function like:
+
+	func Distance(type T Physical)(a, b T) int {
+		return Abs(a.X - b.X) + Abs(a.Y - b.Y)
+	}
+
+* Laziness (cont'd)
+
+Theoretically, this would be faster than having to call GetX, GetY for interfaces.
+But, this technique will limit code composability by forcing structs and eschewing computed values. 
+It's probably a better idea to use an interface most of the time.
+
+* Calling a method OR a function field
+
+This is a small but very useful feature of generics. You can write a contract like so:
+
+	contract Collidable(t T) {
+		var obj Object // game object
+		t.Collide(obj)
+	}
+
+Both of these types satisfy Collidable:
+
+	type Collider interface{
+		Collide(Object)
+	}
+
+	type Area struct{
+		Collide func(Object)
+	}
+
+This can be useful for quick and dirty "generic" implementations of common tasks, or it could be useful for testing and mocking things.
+
+Why not use this instead of interfaces? You can't type-assert something.(Collidable)
+
+* Reflection
+
+The proposal states that the runtime won't be aware of generics. But can we use generics to improve code that currently uses interface{} and reflection?
+
+	// Unmarshal decodes a DynamoDB value into out, which must be a pointer.
+	func Unmarshal(av *dynamodb.AttributeValue, out interface{}) error {
+		// ...
+	}
+
+We always want to get a pointer, so maybe something like this would be better?
+
+	contract Ptr(t T) {
+		*t
+	}
+
+	func Unmarshal(type T Ptr)(av *dynamodb.AttributeValue, out T) {
+		x := reflect.ValueOf(out).Elem() // no panic!
+	}
+
+* go generate
+
+Why not just use "go generate"?
+
+IMO, go generate is a hack.
+
+- When should you run go generate? Who knows. Depends on the project and your changes.
+- You can't/shouldn't edit generated files.
+- A sufficiently advanced go generate implementation of generics is just going to recreate the generics proposal as some kind of unofficial Go sublanguage. 
+- A naive implementation of generics with generate (such as templated code) provides you with no real type checking until your "go build" mysteriously breaks. 
+
+go generate can be useful for something like fast encoding/decoding of structs (like msgpack), but as a way to implement language extensions like generics, it falls short. 
+
+* go generate (cont'd)
+
+.image pic.png
+
+* Misc. thoughts
+
+- Too many parentheses!
+- Contracts will be difficult for beginners to understand
+- Still no sum types (for example: struct OR map[string]interface{})
