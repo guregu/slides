@@ -106,7 +106,7 @@ Let's say we have a page like this:
 		</center>
 	</p>
 
-This actually gets parsed as 
+This actually gets parsed as:
 
 	<!-- 仕様です -->
 	<p class="pic"></p>
