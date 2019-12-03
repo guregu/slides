@@ -2,7 +2,7 @@ GoQueryとcascadiaはすごいよ
 Crawler Night 2020 Winter
 3 Dec 2019
 
-Gregory Roseberry
+Gregory Roseberry (guregu)
 Wondershake
 greg@toki.waseda.jp
 https://github.com/guregu
@@ -99,7 +99,7 @@ and `:not` to negate it.
 
 Let's say we have a page like this:
 
-	<p id="pic">
+	<p class="pic">
 		<center>
 			<img src="...">
 			<span class="pic-caption">...</span>
@@ -109,10 +109,10 @@ Let's say we have a page like this:
 This actually gets parsed as 
 
 	<!-- 仕様です -->
-	<p id="pic"></p>
+	<p class="pic"></p>
 	<center>
 		<img ...>
-		<span>...</span>
+		<span>...</span>s
 	</center>
 	<p></p>
 
@@ -137,3 +137,9 @@ We can use CSS attribute selectors as a hack.
 
 .link https://github.com/PuerkitoBio/goquery
 .link https://github.com/andybalholm/cascadia
+
+- 宣伝
+	
+GoのDynamoDBの使いやすいパッケージを作ってます
+
+.link https://github.com/guregu/dynamo
