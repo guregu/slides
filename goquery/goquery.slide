@@ -1,0 +1,139 @@
+GoQueryとcascadiaはすごいよ
+Crawler Night 2020 Winter
+3 Dec 2019
+
+Gregory Roseberry
+Wondershake
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* What I'm Crawling
+
+Articles for LOCARI
+
+Crawl articles from partner websites.
+Convert from HTML to our internal JSON format.
+
+.image article.png
+
+* GoQuery
+
+Go has an official HTML package (golang.org/x/net/html), but it's very low level.
+GoQuery is a JQuery-like wrapper around this.
+
+.link https://github.com/PuerkitoBio/goquery
+
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+
+	// print the src of <img class="article-pic" src="...">
+	doc.Find("img.article-pic").Each(func(_ int, sel *goquery.Selection) {
+		fmt.Println("src:", sel.AttrOr("src", ""))
+	})
+
+Uses the cascadia library for CSS selectors. Very powerful.
+
+.link https://github.com/andybalholm/cascadia
+
+* Ideal article
+
+If every site had articles like this, it would be easy to parse.
+
+	<html>
+		<head>...</head>
+		<body>
+			<h1 id="article-title">Hello world</h1>
+			<article>
+				<h2>Header</h2>
+				<p>Simple text</p>
+				<figure>
+					<img src="...">
+					<figcaption>©︎Hoge</figcaption>
+				</figure>
+			</article>
+		</body>
+	</html>
+
+Our crawler can handle this mostly automatically.
+But it's never that simple...
+
+* Example 1: Abusing strong as headers
+
+Sometimes we need to manually specify which element to transform into what.
+
+	<article>
+		<h2>おすすめのメイクTOP3</h2>
+		<p>これは私の一押しメイクです！</p>
+		<p><strong>①〇〇社の△△△</strong></p> <!-- want to make this a header -->
+		<p>〇〇社は相変わらず<strong>すごい</strong>ですね！</p>
+	</article>
+
+If we use `article > p > strong`, we'll select partial text.
+We can use `article > p > strong:only-child` instead!
+
+	# crawler site configuration file
+	[[find]]
+	header_small = "article > p > strong:only-child"
+
+* Example 2: Avoiding links
+
+How about this?
+Our article format doesn't support links in headers :(
+
+	<article>
+		...
+		<p><strong>①〇〇社の<a href="http://affi.com/...">△△△</a></strong></p>
+		...
+		<p><strong>おまけ</strong></p>
+		...
+	</article>
+
+Let's avoid `a` elements.
+We can use the `:has` pseudo-class to select elements based on their children,
+and `:not` to negate it.
+
+	[[find]]
+	header_small = "p > strong:only-child:not(:has(a))"
+	richtext = "p > strong:only-child:has(a)"
+
+* Example 3: Malformed HTML
+
+Let's say we have a page like this:
+
+	<p id="pic">
+		<center>
+			<img src="...">
+			<span class="pic-caption">...</span>
+		</center>
+	</p>
+
+This actually gets parsed as 
+
+	<!-- 仕様です -->
+	<p id="pic"></p>
+	<center>
+		<img ...>
+		<span>...</span>
+	</center>
+	<p></p>
+
+But you can select it like:
+	
+	image = "p.pic:empty + center:has(img)"
+
+* Example 4: Inline Styles
+
+How about:
+
+	<p style="text-align: left; font-size: .8em;">Small text</p>
+
+Gross! But there are more sites like this than you'd think (WYSWYG editors?).
+We can use CSS attribute selectors as a hack.
+
+	text_small = "p[style*='font-size: .8em']"
+
+* Closing thoughts
+
+実際はもっと闇が深いが、ざっくり紹介させていただきました。
+
+.link https://github.com/PuerkitoBio/goquery
+.link https://github.com/andybalholm/cascadia
