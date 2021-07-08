@@ -15,7 +15,7 @@ We want to be able to pass this across different packages easily, especially mid
 Examples:
 
 - Unique ID of the request for logging purposes
-- Currently logged in user
+- Currently logged in user (e.g. JWT claims)
 - Workspace or other business object associated with the request
 
 How do we do this without sacrificing type-safety?
@@ -35,7 +35,10 @@ Context is an opaque object that provides:
 
 We will be covering the second use case.
 
+* History lesson
+
 The context package was added in Go 1.5, before that it was a wild west of bespoke soltuions.
+
 This is why many packages have an API that contains two sets of methods: one that takes context and one that does not.
 
 	func (*Update) Run() error
@@ -44,6 +47,8 @@ This is why many packages have an API that contains two sets of methods: one tha
 And also why Gin has its own crappy Context object with this field:
 	
 	Keys map[string]interface{}
+
+We will be getting into why exactly this is crappy soon.
 
 * Using context
 
@@ -67,33 +72,36 @@ Let's take a look at WithValue and Value's function signatures.
 
 	func WithValue(parent Context, key, val interface{}) Context
 
-	type Context {
+	type Context interface{
 		// ...
 		Value(key interface{}) interface{}
 	}
 
 Notice that `interface{}` is the type used for keys and values.
 
-interface{} is the "anything type" in Go. It can hold any value.
-Think of it kind of like Object in Java or Javascript, or void* in C, although it has many differences.
+`interface{}` is the "anything type" in Go. It can hold any value.
+Think of it kind of like `Object` in Java or Javascript, or `void*` in C, although it has many differences.
 
 It's actually an inline interface definition literal: an interface with zero methods.
-Because every value has at least zero methods, any value can be represented by interface{}.
+Because every value has at least zero methods, any value can be represented by `interface{}`.
 
 * Type assertions
 
-In order to do useful things with interface{}, we usually have to use a type assertion.
-
+In order to do useful things with `interface{}`, we usually have to use a type assertion.
+	
+	// value is type interface{}
 	str := value.(string)     // panics if value is not a string
 	str, ok := value.(string) // does not panic, ok becomes true if successful
 
 There is also something called a type switch but I won't get into it.
 
-* This sucks
+Also do note that `interface{}` is almost always a code smell, unless you really truly can accept any kind of object whatsoever. For example, the `encoding/json` standard package uses `interface{}` to encode and decode (almost) any kind of object. Use with caution.
 
-So now we have a problem: context gives us interface{} an "any object".
+* I don't like this
 
-	requestID := ctx.Value("requestID").(int64)
+So now we have a problem: context gives us `interface{}`, an "any object".
+
+	requestID := ctx.Value("requestID").(int64) // must assert （´・ω・｀）
 
 This sucks, why doesn't Go have generics?! 
 
@@ -128,6 +136,8 @@ What happens if we import some third-party library that decides they want to set
 
 It's possible that our data could get overwritten, and even become a different type causing type assertions to panic.
 
+Or we could make a typo and use the wrong key. That's not good. We want the compiler to enforce some safety here.
+
 * The better key
 
 There's an easy solution. We will define a new private type that only our package can access:
@@ -136,6 +146,10 @@ There's an easy solution. We will define a new private type that only our packag
 	type ctxKey struct{}
 
 This looks a little weird, but we're defining a new type that is an empty struct. This is actually a zero-sized value and saves a bit of memory, but you could also define a type based on a string or an integer or whatever you want.
+
+The reason this "zero-byte" value works as a unique key is because interface values in Go are actually a tuple of "type information" and the "concrete value". We take advantage of this by having our "type information" be unique, and we don't need to use the concrete value so it can be zero-bytes.
+
+This is unlike `void*` in C which contains no information on the underlying type.
 
 * The setter
 
@@ -152,7 +166,7 @@ Now, we'll use this type for our key instead of a string. Let's create a "setter
 
 This solves problems #3 and #4. It's impossible for our key to collide because it's private. No other package can access it.
 This also lets us control exactly how the key works internally without exposing its API.
-Consumers of the requestID package need only to call this function:
+Consumers of the `requestid` package need only to call this function:
 	
 	id := generateRequestID()
 	ctx = requestid.NewContext(ctx, id)
@@ -182,13 +196,13 @@ Another option is to return two values:
 		return
 	}
 
-However this can be clunkier to use. It depends on your data and the likelihood if it being missing.
+However this can be clunkier to use. It depends on your data, the likelihood if it being missing, and whether you have useful zero values at all.
 
 * We did it
 
 This solves problems #1 and #2. Consumers of our package no longer need to type assert at all. 
 
-- It returns the proper type, not interface{}.
+- It returns the proper type, not `interface{}`.
 - It will never panic.
 
 * Full code
