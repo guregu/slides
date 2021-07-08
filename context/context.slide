@@ -10,9 +10,10 @@ https://github.com/guregu
 * The Goal
 
 We want to be able to flexibly store any kind of value within the context of a request.
-We want to be able to pass this across different packages easily.
+We want to be able to pass this across different packages easily, especially middleware and request handlers.
 
 Examples:
+
 - Unique ID of the request for logging purposes
 - Currently logged in user
 - Workspace or other business object associated with the request
@@ -28,6 +29,7 @@ Package context defines the Context type, which carries deadlines, cancellation 
 * What does that actually mean?
 
 Context is an opaque object that provides:
+
 - A standard way to stop other goroutines from outside, with a timeout or by explicitly canceling it.
 - A standard way to store "request-scoped" data (e.g. the currently logged in user).
 
@@ -38,6 +40,10 @@ This is why many packages have an API that contains two sets of methods: one tha
 
 	func (*Update) Run() error
 	func (*Update) RunWithContext(ctx context.Context) error
+
+And also why Gin has its own crappy Context object with this field:
+	
+	Keys map[string]interface{}
 
 * Using context
 
@@ -225,7 +231,6 @@ Here's some middleware to set the Request ID:
 	
 And an example of logging the request ID within an HTTP handler:
 
-	// within an HTTP handler, log the request ID
 	func someHandler(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		id := requestid.FromContext(ctx)
