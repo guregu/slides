@@ -1,0 +1,245 @@
+Type-safe Context
+Aukai Bookclub #2
+9 Jul 2021
+
+Gregory Roseberry (guregu)
+Mitsubishi (※下請け)
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* The Goal
+
+We want to be able to flexibly store any kind of value within the context of a request.
+We want to be able to pass this across different packages easily.
+
+Examples:
+- Unique ID of the request for logging purposes
+- Currently logged in user
+- Workspace or other business object associated with the request
+
+How do we do this without sacrificing type-safety?
+
+* Do you know "context"?
+
+Godoc says:
+
+Package context defines the Context type, which carries deadlines, cancellation signals, and other request-scoped values across API boundaries and between processes.
+
+* What does that actually mean?
+
+Context is an opaque object that provides:
+- A standard way to stop other goroutines from outside, with a timeout or by explicitly canceling it.
+- A standard way to store "request-scoped" data (e.g. the currently logged in user).
+
+We will be covering the second use case.
+
+The context package was added in Go 1.5, before that it was a wild west of bespoke soltuions.
+This is why many packages have an API that contains two sets of methods: one that takes context and one that does not.
+
+	func (*Update) Run() error
+	func (*Update) RunWithContext(ctx context.Context) error
+
+* Using context
+
+Every HTTP request has a context associated with it. You can get it with the `Context()` method.
+
+	func someHandler(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+You can store things inside of the context with the `context.WithValue` function.
+Note that this does not modify the parent context; it creates a new context. Think of it like an immutable linked list.
+
+		ctx = context.WithValue(ctx, "keyGoesHere", value)
+
+You can retrieve things with the `Value` method of context.Context.
+
+		value := ctx.Value("keyGoesHere")
+
+* The empty interface
+
+Let's take a look at WithValue and Value's function signatures.
+
+	func WithValue(parent Context, key, val interface{}) Context
+
+	type Context {
+		// ...
+		Value(key interface{}) interface{}
+	}
+
+Notice that `interface{}` is the type used for keys and values.
+
+interface{} is the "anything type" in Go. It can hold any value.
+Think of it kind of like Object in Java or Javascript, or void* in C, although it has many differences.
+
+It's actually an inline interface definition literal: an interface with zero methods.
+Because every value has at least zero methods, any value can be represented by interface{}.
+
+* Type assertions
+
+In order to do useful things with interface{}, we usually have to use a type assertion.
+
+	str := value.(string)     // panics if value is not a string
+	str, ok := value.(string) // does not panic, ok becomes true if successful
+
+There is also something called a type switch but I won't get into it.
+
+* This sucks
+
+So now we have a problem: context gives us interface{} an "any object".
+
+	requestID := ctx.Value("requestID").(int64)
+
+This sucks, why doesn't Go have generics?! 
+
+- #1: Am I supposed to just type-assert all over the place? So ugly.
+- #2: What if it panics? You want me to check the ok result every time or just YOLO?
+- #3: What if I want to change the type it uses, or the key?
+- #4: What if someone uses the same key as me and they collide?
+
+Hold on. Before you start rewriting all the code in Rust, let's solve all of these problems.
+
+* The example
+
+Let's say we want to store a unique ID for each request that our API receives.
+We can use this unique ID to log requests or whatever you want.
+
+This is just an example of the most basic use-case for context values.
+
+	package requestid
+
+	// code goes here
+
+* The key 
+
+The first problem we will solve is making sure our key does not collide with other packages.
+
+In our previous examples we used a simple string as a key.
+
+	// set the request ID
+	ctx = context.WithValue(ctx, "requestID", value)
+
+What happens if we import some third-party library that decides they want to set this key too?
+
+It's possible that our data could get overwritten, and even become a different type causing type assertions to panic.
+
+* The better key
+
+There's an easy solution. We will define a new private type that only our package can access:
+	
+	// lowercase means it's unexported (private)
+	type ctxKey struct{}
+
+This looks a little weird, but we're defining a new type that is an empty struct. This is actually a zero-sized value and saves a bit of memory, but you could also define a type based on a string or an integer or whatever you want.
+
+* The setter
+
+Now, we'll use this type for our key instead of a string. Let's create a "setter" that uses our type.
+	
+	pacakge requestid
+
+	import "context"
+
+	// NewContext returns a new context associated with the given requestID.
+	func NewContext(parent context.Context, requestID int64) context.Context {
+		return context.WithValue(parent, ctxKey{}, requestID)
+	}
+
+This solves problems #3 and #4. It's impossible for our key to collide because it's private. No other package can access it.
+This also lets us control exactly how the key works internally without exposing its API.
+Consumers of the requestID package need only to call this function:
+	
+	id := generateRequestID()
+	ctx = requestid.NewContext(ctx, id)
+
+* The value (getter)
+
+Now we need to create a "getter" to access our value from the context.
+We have two options here. Here's one:
+	
+	// FromContext returns the request ID associated with this context, or zero.
+	func FromContext(ctx context.Context) int64 {
+		// this will never panic:
+		id, _ := ctx.Value(ctxKey{}).(int64)
+		return id
+	}
+
+We are using Go's zero value to indicate a lack of a request ID associated with the context here. This is the most idiomatic way.
+
+* Alternate getter
+
+Another option is to return two values:
+	
+	// FromContext returns the request ID associated with this context.
+	func FromContext(ctx context.Context) (id int64, ok bool) {
+		// this will also never panic:
+		id, ok = ctx.Value(ctxKey{}).(int64)
+		return
+	}
+
+However this can be clunkier to use. It depends on your data and the likelihood if it being missing.
+
+* We did it
+
+This solves problems #1 and #2. Consumers of our package no longer need to type assert at all. 
+
+- It returns the proper type, not interface{}.
+- It will never panic.
+
+* Full code
+	
+	package requestid
+
+	import "context"
+
+	type ctxKey struct{}
+
+	// NewContext returns a new context associated with the given requestID.
+	func NewContext(parent context.Context, requestID int64) context.Context {
+		return context.WithValue(parent, ctxKey{}, requestID)
+	}
+
+	// FromContext returns the request ID associated with this context, or zero.
+	func FromContext(ctx context.Context) int64 {
+		// this will never panic:
+		id, _ := ctx.Value(ctxKey{}).(int64)
+		return id
+	}
+
+By adding two simple functions, we can avoid basically every problem with context.
+In general, when you store something in context you should always make these.
+Never use a string as a key for context values.
+
+* Using it
+
+Here's some middleware to set the Request ID:
+
+	func setRequestID(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.RequestWriter, r *http.Request) {
+			ctx := r.Context()
+			id := generateRequestID() 
+			ctx = requestid.NewContext(ctx, id)
+			r = r.WithContext(ctx)
+			next.ServeHTTP(w, r)
+		})
+	}
+	
+And an example of logging the request ID within an HTTP handler:
+
+	// within an HTTP handler, log the request ID
+	func someHandler(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		id := requestid.FromContext(ctx)
+		log.Println("Request ID:", id)
+	}
+
+
+* Summary
+
+Adding a tiny bit of boilerplate gains us a whole lot of type-safety and ergonomics.
+
+Never use strings as the key in context.
+
+
+Check out this official blog post about context which also covers this topic:
+
+.link https://blog.golang.org/context
