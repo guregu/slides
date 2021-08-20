@@ -1,0 +1,287 @@
+Errors in Go
+Aukai Bookclub #4
+20 Aug 2021
+
+Gregory Roseberry (guregu)
+"Aukai"
+greg@toki.waseda.jp
+https://github.com/guregu
+
+* Let's talk about errors
+
+- Brief intro to errors in Go
+- Adding context to errors
+- Safely comparing errors
+- Safely converting errors
+
+* Errors
+
+Errors in Go use the built-in `error` type.
+
+Always the last return value.
+
+	func foo() error
+	func bar() (Widget, error)
+
+Generally named `err` when used.
+
+	thing, err := getThing()
+
+Nil indicates that no error occured.
+	
+	if err != nil {
+		return err
+	}
+
+* What actually is an error?
+
+The `error` type is a built-in interface. "Errors are just values."
+
+	type error interface {
+		Error() string
+	}
+
+You can implement the old errors package in like 10 lines:
+
+	package errors
+
+	type errorString string
+
+	func (es errorString) Error() string {
+		return string(es)
+	}
+
+	func New(msg string) error {
+		return errorString(msg)
+	}
+
+	// Usage: return errors.New("incorrect password")
+
+* The problem
+
+Imagine this: something broke the QA tests so you check the log.
+You are greeted with something like:
+
+	Error: sql: no rows in result set
+
+Which part broke?
+
+	function GetThing() (*Thing, error) {
+		a, err := db.getA()
+		if err != nil {
+			return nil, err
+		}
+		b, err := db.getB()
+		if err != nil {
+			return nil, err
+		}
+		return db.getThing(a, b)
+	}
+
+
+* Potential solutions
+
+How do we diffentiate between the errors?
+
+Ideas:
+
+- Improve logging (good idea, but doesn't solve root issue of the "error chain", only gives you a stream of events)
+- Make a custom error type for each thing (too annoying)
+- Panic and look at the stack trace (too unstructured)
+- Insert a stack trace into a wrapped error (`github.com/pkg/errors` - briefly in vogue, but compatibility issues)
+
+Is there something else?
+
+* The solution
+
+In Go 1.13 (2019), the standard library `errors` package was expanded, adding a standard way to wrap errors.
+	
+	// not actually a public type, probably because they didn't want people to depend on it
+	interface {
+		Unwrap() error
+	}
+
+You can use `fmt.Errorf` combined with the new `%w` verb to wrap errors (w = wrap?).
+
+	return fmt.Errorf("getA failed: %w", err)
+
+This gives us a handy way to apply context to an error.
+
+* The solution applied
+
+	function GetThing() (*Thing, error) {
+		a, err := db.getA()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get A: %w", err)
+		}
+		b, err := db.getB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get B: %w", err)
+		}
+		thing, err := db.getThing(a, b)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get Thing: %w", err)
+		}
+		return thing, nil
+	}
+
+Now our log says:
+
+	Error: failed to get B: sql: no rows in result set
+
+We now know that B is the culprit!
+
+* Extra context
+
+Adding some extra context to that error helped us debug it.
+
+You can add as much context as you want:
+
+	fmt.Errorf("failed to get B for user ID %d: %w", userID, err)
+
+However, it won't replace structured logging.
+
+* New problem
+
+Now we've got a new problem, this HTTP handler broke and no longer handles 404 Not Found properly.
+
+	type ErrNotFound = sql.ErrNoRows
+	
+	// thingHandler is an HTTP handler that shows a thing
+	func thingHandler(w http.ResponseWriter, r *http.Request) {
+		thing, err := GetThing()
+		if err == ErrNotFound {
+			http.NotFound(w) // render 404
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		// render thing...
+	}
+
+Because we're wrapping the error, `err == ErrNotFound` is no longer true.
+Let's fix this.
+
+* New solution
+
+Always use `errors.Is` to check for error equality.
+
+	func thingHandler(w http.ResponseWriter, r *http.Request) {
+		thing, err := GetThing()
+		if errors.Is(err, ErrNotFound) { //🈁
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		// ...
+	}
+
+Once you wrap, you never go back. You must use `errors.Is` for everything.
+
+* On that note
+
+Because you're not supposed to use the `error.Error()` string for anything, package authors provide ways to 'upgrade' your error via type casting.
+
+Here's an example of a function I've carried around a lot:
+	
+	func IsCondCheckErr(err error) bool {
+		ae, ok := err.(awserr.Error)
+		if ok {
+			return ae.Code() == "ConditionalCheckFailedException"
+		}
+		return false
+	}
+
+This is used in DynamoDB to check whether a condition we specified in the query made it fail, which can be very useful.
+
+Of course, wrapping errors breaks this. Let's fix it.
+
+* Converting errors
+
+The trusty `errors` package provides us with a solution: `errors.As`.
+
+	func IsCondCheckErr(err error) bool {
+		var ae awserr.Error
+		if errors.As(err, &ae) {
+			return ae.Code() == "ConditionalCheckFailedException"
+		}
+		return false
+	}
+
+The syntax is a bit tricky, but it's the same concept as `json.Unmarshal`.
+Make sure to pass it a `&reference` to the error you're looking for.
+
+In the above example, `awserr.Error` is an interface.
+
+Keep in mind that if the error type is a pointer, you need to pass a pointer to a pointer:
+
+	var perr *fs.PathError
+	if errors.As(err, &perr) { // **fs.PathError
+		fmt.Println(perr.Path)
+	}
+
+
+* Cool story bro
+
+I released v4 of `guregu/null` with error wrapping everywhere.
+You can check it out for an idea of how to use `fmt.Errorf` and `%w`.
+Some of these changes broke some internal machinery around `encoding/json` and its custom errors, resulting in less detailed error messages in certain situations.
+
+.link https://github.com/guregu/null/issues/66
+
+Looks like a bug in the standard library which could be resolved by using `errors.As` instead of a type assertion.
+
+.link https://github.com/golang/go/issues/45449
+
+First time I could say "not my fault, stdlib bug".
+
+* Summary
+
+Wrapping:
+	
+	// Use fmt.Errorf and %w to wrap errors
+	fmt.Errorf("iam: couldn't get realm certificate: %w", err)
+
+Comparison:
+
+	// Don't compare errors with the equality operator
+	if err == sql.ErrNoRows { ❌ }
+
+	// Use errors.Is instead
+	if errors.Is(err, sql.ErrNoRows) { 👍 }
+
+Conversion:
+	
+	// Don't use type assertions directly
+	if someErr, ok := err.(*ConcreteErrType); ok { ❌ }
+
+	// Use errors.As instead
+	var someErr *ConcreteErrType
+	if errors.As(err, &someErr) { 👍 }
+
+* Takeaway
+
+🤔 Should we wrap every error that gets returned?
+
+It depends. It's not something that is 100% necessary always, but it can't really hurt either. Look for potentially ambiguous spots, like the GetThing example in these slides.
+
+Wrapping an error like `sql.ErrNoRows` and exposing that to clients essentially adds that as part of your API. Even if you change what database you use, you'd still have to return `sql.ErrNoRows`. That's one reason why I used a type alias in the examples, but you should always be thinking about which errors you want users to check against.
+
+🤔 Should we use `errors.Is` and `errors.As` even if we don't wrap things (yet)?
+
+Yes. Your dependencies might be wrapping errors without you knowing it. It's best practice to account for wrapping always.
+
+* Futher reading
+
+Official Go Blog article about Go 1.13 errors, the subject of this presentation.
+
+.link https://go.dev/blog/go1.13-errors
+
+"Errors are Values", which covers some advanced error usage elided here.
+
+.link https://go.dev/blog/errors-are-values
+
+If you're tired of typing `if err != nil { return err }` check out the above article.
